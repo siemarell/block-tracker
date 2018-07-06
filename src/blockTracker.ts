@@ -5,7 +5,7 @@ import {
     concatMap,
     filter,
     concatAll,
-    exhaustMap, distinct
+    exhaustMap, distinct, tap
 } from "rxjs/operators";
 import {interval, Observer, Subject, merge} from "rxjs";
 import {Subscription} from "rxjs/internal/Subscription";
@@ -68,23 +68,27 @@ export class BlockTracker {
         //ToDo: What if height, returned from node, is smaller than height, returned from storage
         let blocksToSync: Array<number> = [];
 
-        const {height, signature} = await this.wavesApi.API.Node.blocks.last();
-        const {lastHeight, lastSig} = await this.storage.getLastHeightAndSig();
+        const chainLast = await this.wavesApi.API.Node.blocks.last();
+        const storageLast = await this.storage.last();
 
+        console.log(`Last block: ${chainLast.signature} at ${chainLast.height}`)
+        if (storageLast) console.log(`Last block in storage: ${storageLast.signature} at ${storageLast.height}`)
         //Todo: implement logic on empty storage or when height diff is too big
-        if (!(lastHeight || lastSig)) return [height];
-
-        if (signature !== lastSig) {
-            const heightToSync = await this.getHeightToSyncFrom(lastHeight, height);
-            blocksToSync = Array.from(Array(height - heightToSync).keys())
+        if (!chainLast) {
+            blocksToSync = []
+        }
+        else if (!storageLast) {
+            blocksToSync = [chainLast.height]
+        } else if (chainLast.signature !== storageLast.signature) {
+            const heightToSync = await this.getHeightToSyncFrom(storageLast.height);
+            blocksToSync = Array.from(Array(chainLast.height - heightToSync).keys())
                 .map(x => x + heightToSync + 1)
         }
         console.log(
-            `Current height: ${height}, Blocks to sync: ${blocksToSync}`
+            `Current height: ${chainLast.height}, Blocks to sync: ${blocksToSync}`
         );
         return blocksToSync;
     };
-
 
     private blockObserver: Observer<any> = {
         closed: false,
@@ -103,26 +107,21 @@ export class BlockTracker {
         }
     };
 
-    getHeightToSyncFrom = async (lastHeight: number, currentHeight: number): Promise<number> => {
-        const loop = async (height: number, attempts: number): Promise<number> => {
-            if (attempts <= 0) return height;
-
+    getHeightToSyncFrom = async (lastHeight: number): Promise<number> => {
+        const loop = async (height: number): Promise<number> => {
             const blockInStorage = await this.storage.getBlockAt(height);
             if (!blockInStorage) {
-                //no more blocks in history
-                return height;
+                return height; //reached bottom
             }
 
             const blockInChain = await this.wavesApi.API.Node.blocks.at(blockInStorage.height);
-
             if (blockInChain.signature === blockInStorage.signature) {
                 return height
             }
-            else return await loop(height - 1, attempts - 1)
+            else return await loop(height - 1)
         };
-        const diff = currentHeight - lastHeight;
-        if (diff > this.blockHistory) return currentHeight
-        else return await loop(lastHeight, this.blockHistory - diff);
+
+        return await loop(lastHeight);
     }
 }
 

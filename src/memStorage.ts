@@ -16,13 +16,13 @@ export class MemStorage implements IStorage{
     }
 
     async getBlockAt(height: number): Promise<any> {
-        this.storage.get(height)
+        return this.storage.get(height)
     }
 
-    async getLastHeightAndSig(): Promise<{ lastHeight: number; lastSig: string }> {
+    async last() {
         const max = Math.max(...Array.from(this.storage.keys()));
-        if (max === -Infinity) return {lastHeight: undefined, lastSig: undefined};
-        return {lastHeight: max, lastSig: this.storage.get(max).signature};
+        if (max === -Infinity) return undefined;
+        return await this.getBlockAt(max)
     }
 
     async saveBlock(block: any): Promise<void> {
