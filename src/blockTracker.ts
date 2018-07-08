@@ -65,22 +65,22 @@ export class BlockTracker {
     };
 
     private _getBlockHeightsToSync = async () => {
-        //ToDo: What if height, returned from node, is smaller than height, returned from storage
         let blocksToSync: Array<number> = [];
 
         const chainLast = await this.wavesApi.API.Node.blocks.last();
         const storageLast = await this.storage.last();
 
-        console.log(`Last block: ${chainLast.signature} at ${chainLast.height}`)
-        if (storageLast) console.log(`Last block in storage: ${storageLast.signature} at ${storageLast.height}`)
-        //Todo: implement logic on empty storage or when height diff is too big
         if (!chainLast) {
             blocksToSync = []
         }
         else if (!storageLast) {
             blocksToSync = [chainLast.height]
-        } else if (chainLast.signature !== storageLast.signature) {
-            const heightToSync = await this.getHeightToSyncFrom(storageLast.height);
+        }
+        else if (
+            chainLast.height > storageLast.height ||
+            (chainLast.height === storageLast.height  && chainLast.transactionCount > storageLast.transactionCount)
+        ) {
+            const heightToSync = await this.getHeightToSyncFrom(storageLast.height, chainLast.height);
             blocksToSync = Array.from(Array(chainLast.height - heightToSync).keys())
                 .map(x => x + heightToSync + 1)
         }
@@ -107,21 +107,23 @@ export class BlockTracker {
         }
     };
 
-    getHeightToSyncFrom = async (lastHeight: number): Promise<number> => {
+    getHeightToSyncFrom = async (storageHeight: number, chainHeight: number): Promise<number> => {
+
         const loop = async (height: number): Promise<number> => {
             const blockInStorage = await this.storage.getBlockAt(height);
-            if (!blockInStorage) {
-                return height; //reached bottom
+            if (!blockInStorage || (chainHeight - height > this.blockHistory)) {
+                // No block in storage to sync from. Sync only last block in chain
+                return chainHeight;
             }
 
-            const blockInChain = await this.wavesApi.API.Node.blocks.at(blockInStorage.height);
+            const blockInChain = await this.wavesApi.API.Node.blocks.at(height);
             if (blockInChain.signature === blockInStorage.signature) {
                 return height
             }
             else return await loop(height - 1)
         };
 
-        return await loop(lastHeight);
+        return await loop(storageHeight);
     }
 }
 
